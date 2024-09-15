@@ -2,14 +2,22 @@ defmodule TelemetryMetricsPrometheus.Core.Registry do
   @moduledoc false
   use GenServer
 
-  require Logger
-
   alias Telemetry.Metrics
-  alias TelemetryMetricsPrometheus.Core.{Counter, Distribution, LastValue, Sum}
+  alias TelemetryMetricsPrometheus.Core.Counter
+  alias TelemetryMetricsPrometheus.Core.Distribution
+  alias TelemetryMetricsPrometheus.Core.LastValue
+  alias TelemetryMetricsPrometheus.Core.Sum
+
+  require Logger
 
   @type name :: atom()
   @type metric_exists_error() :: {:error, :already_exists, Metrics.t()}
   @type unsupported_metric_type_error() :: {:error, :unsupported_metric_type, :summary}
+  @aggregates_persistent_path Application.compile_env(
+                                :telemetry_metrics_prometheus_core,
+                                :persistent_path,
+                                "./.prometheus_aggregates"
+                              )
 
   # metric_name should be the validated and normalized prometheus
   # name - https://prometheus.io/docs/instrumenting/writing_exporters/#naming
@@ -27,6 +35,7 @@ defmodule TelemetryMetricsPrometheus.Core.Registry do
   def init(opts) do
     name = opts[:name]
     aggregates_table_id = create_table(name, :set)
+    restore_aggregates(aggregates_table_id)
     dist_table_id = create_table(String.to_atom("#{name}_dist"), :duplicate_bag)
     start_async = Keyword.get(opts, :start_async, true)
 
@@ -106,8 +115,7 @@ defmodule TelemetryMetricsPrometheus.Core.Registry do
   end
 
   @spec validate_prometheus_type!(Metrics.t()) :: :ok | no_return()
-  def validate_prometheus_type!(%Metrics.Sum{reporter_options: reporter_options})
-      when is_list(reporter_options) do
+  def validate_prometheus_type!(%Metrics.Sum{reporter_options: reporter_options}) when is_list(reporter_options) do
     case Keyword.get(reporter_options, :prometheus_type) do
       nil ->
         :ok
@@ -165,10 +173,34 @@ defmodule TelemetryMetricsPrometheus.Core.Registry do
 
   @impl true
   def terminate(_reason, %{metrics: metrics, config: config} = _state) do
+    save_aggregates(config.aggregates_table_id)
+
     with :ok <- Enum.each(metrics, &unregister_metric/1),
          true <- :ets.delete(config.aggregates_table_id),
          true <- :ets.delete(config.dist_table_id),
          do: :ok
+  end
+
+  defp restore_aggregates(tab) do
+    if File.exists?(@aggregates_persistent_path) do
+      records =
+        @aggregates_persistent_path
+        |> File.read!()
+        |> :zlib.gunzip()
+        |> :erlang.binary_to_term()
+
+      :ets.insert(tab, records)
+    end
+  end
+
+  defp save_aggregates(tab) do
+    File.write(
+      @aggregates_persistent_path,
+      tab
+      |> :ets.tab2list()
+      |> :erlang.term_to_binary()
+      |> :zlib.gzip()
+    )
   end
 
   defp setup_registry(opts, config) do
@@ -184,16 +216,13 @@ defmodule TelemetryMetricsPrometheus.Core.Registry do
 
   @spec register_metrics([Metrics.t()], map()) :: [Metrics.t()]
   defp register_metrics(metrics, config) do
-    metrics
-    |> Enum.reduce([], fn metric, acc ->
+    Enum.reduce(metrics, [], fn metric, acc ->
       case register_metric(metric, config) do
         {:ok, metric} ->
           [metric | acc]
 
         {:error, :already_exists, metric_name} ->
-          Logger.warning(
-            "Metric name already exists. Dropping measure. metric_name:=#{inspect(metric_name)}"
-          )
+          Logger.warning("Metric name already exists. Dropping measure. metric_name:=#{inspect(metric_name)}")
 
           acc
 
