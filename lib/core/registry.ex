@@ -18,6 +18,7 @@ defmodule TelemetryMetricsPrometheus.Core.Registry do
                                 :persistent_path,
                                 "./.prometheus_aggregates"
                               )
+  @do_backup_every 7
 
   # metric_name should be the validated and normalized prometheus
   # name - https://prometheus.io/docs/instrumenting/writing_exporters/#naming
@@ -43,7 +44,8 @@ defmodule TelemetryMetricsPrometheus.Core.Registry do
 
     state = %{
       config: %{aggregates_table_id: aggregates_table_id, dist_table_id: dist_table_id},
-      metrics: []
+      metrics: [],
+      do_backup: 0
     }
 
     if start_async do
@@ -155,9 +157,13 @@ defmodule TelemetryMetricsPrometheus.Core.Registry do
     {:reply, state.config, state}
   end
 
-  def handle_call(:get_metrics, _from, state) do
+  def handle_call(:get_metrics, _from, %{do_backup: do_backup} = state) do
+    @do_backup_every == Bitwise.band(do_backup, @do_backup_every) and
+      save_aggregates(state.config.aggregates_table_id)
+
     metrics = Enum.map(state.metrics, &elem(&1, 0))
-    {:reply, metrics, state}
+
+    {:reply, metrics, %{state | do_backup: do_backup + 1}}
   end
 
   @impl true
