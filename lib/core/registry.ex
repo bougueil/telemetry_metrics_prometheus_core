@@ -13,12 +13,6 @@ defmodule TelemetryMetricsPrometheus.Core.Registry do
   @type name :: atom()
   @type metric_exists_error() :: {:error, :already_exists, Metrics.t()}
   @type unsupported_metric_type_error() :: {:error, :unsupported_metric_type, :summary}
-  @aggregates_persistent_path Application.compile_env(
-                                :telemetry_metrics_prometheus_core,
-                                :persistent_path,
-                                "./.prometheus_aggregates"
-                              )
-  @do_backup_every 7
 
   # metric_name should be the validated and normalized prometheus
   # name - https://prometheus.io/docs/instrumenting/writing_exporters/#naming
@@ -36,7 +30,6 @@ defmodule TelemetryMetricsPrometheus.Core.Registry do
   def init(opts) do
     name = opts[:name]
     aggregates_table_id = create_table(name, :set)
-    restore_aggregates(aggregates_table_id)
     dist_table_id = create_table(String.to_atom("#{name}_dist"), :duplicate_bag)
     start_async = Keyword.get(opts, :start_async, true)
 
@@ -158,10 +151,7 @@ defmodule TelemetryMetricsPrometheus.Core.Registry do
   end
 
   def handle_call(:get_metrics, _from, %{do_backup: do_backup} = state) do
-    @do_backup_every == Bitwise.band(do_backup, @do_backup_every) and
-      save_aggregates(state.config.aggregates_table_id)
-
-    metrics = Enum.map(state.metrics, &elem(&1, 0))
+      metrics = Enum.map(state.metrics, &elem(&1, 0))
 
     {:reply, metrics, %{state | do_backup: do_backup + 1}}
   end
@@ -179,34 +169,10 @@ defmodule TelemetryMetricsPrometheus.Core.Registry do
 
   @impl true
   def terminate(_reason, %{metrics: metrics, config: config} = _state) do
-    save_aggregates(config.aggregates_table_id)
-
     with :ok <- Enum.each(metrics, &unregister_metric/1),
          true <- :ets.delete(config.aggregates_table_id),
          true <- :ets.delete(config.dist_table_id),
          do: :ok
-  end
-
-  defp restore_aggregates(tab) do
-    if File.exists?(@aggregates_persistent_path) do
-      records =
-        @aggregates_persistent_path
-        |> File.read!()
-        |> :zlib.gunzip()
-        |> :erlang.binary_to_term()
-
-      :ets.insert(tab, records)
-    end
-  end
-
-  defp save_aggregates(tab) do
-    File.write(
-      @aggregates_persistent_path,
-      tab
-      |> :ets.tab2list()
-      |> :erlang.term_to_binary()
-      |> :zlib.gzip()
-    )
   end
 
   defp setup_registry(opts, config) do
