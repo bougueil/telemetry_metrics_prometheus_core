@@ -56,7 +56,10 @@ defmodule TelemetryMetricsPrometheus.Core.Counter do
          :ok <- EventHandler.validate_tags_in_tag_values(config.tags, mapped_values) do
       labels = Map.take(mapped_values, config.tags)
       key = {config.name, labels}
-      _res = :ets.update_counter(config.table, key, 1, {key, 0})
+      _res = case config.name do
+        [:fireforget|_] -> :ets.update_counter(String.to_atom("#{config.table}_oneshot"), key, 1, {key, 0})
+          _ -> :ets.update_counter(config.table, key, 1, {key, 0})
+      end
       :ok
     else
       false -> :ok

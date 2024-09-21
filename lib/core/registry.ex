@@ -30,13 +30,14 @@ defmodule TelemetryMetricsPrometheus.Core.Registry do
   def init(opts) do
     name = opts[:name]
     aggregates_table_id = create_table(name, :set)
+    aggregates_oneshot_table_id = create_table(String.to_atom("#{name}_oneshot"), :set)
     dist_table_id = create_table(String.to_atom("#{name}_dist"), :duplicate_bag)
     start_async = Keyword.get(opts, :start_async, true)
 
     Process.flag(:trap_exit, true)
 
     state = %{
-      config: %{aggregates_table_id: aggregates_table_id, dist_table_id: dist_table_id},
+      config: %{aggregates_table_id: aggregates_table_id, dist_table_id: dist_table_id, aggregates_oneshot_table_id: aggregates_oneshot_table_id},
       metrics: [],
       do_backup: 0
     }
@@ -171,6 +172,7 @@ defmodule TelemetryMetricsPrometheus.Core.Registry do
   def terminate(_reason, %{metrics: metrics, config: config} = _state) do
     with :ok <- Enum.each(metrics, &unregister_metric/1),
          true <- :ets.delete(config.aggregates_table_id),
+         true <- :ets.delete(config.aggregates_oneshot_table_id),
          true <- :ets.delete(config.dist_table_id),
          do: :ok
   end
