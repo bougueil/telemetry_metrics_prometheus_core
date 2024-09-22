@@ -57,7 +57,7 @@ defmodule TelemetryMetricsPrometheus.Core.Counter do
       labels = Map.take(mapped_values, config.tags)
       key = {config.name, labels}
       _res = case config.name do
-        [:fireforget|_] -> :ets.update_counter(String.to_atom("#{config.table}_oneshot"), key, 1, {key, 0})
+        [:plot|_] -> :ets.update_counter(String.to_atom("#{config.table}_oneshot"), key, 1, {key, 0})
           _ -> :ets.update_counter(config.table, key, 1, {key, 0})
       end
       :ok
