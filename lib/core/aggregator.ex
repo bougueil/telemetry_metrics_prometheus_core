@@ -42,13 +42,13 @@ defmodule TelemetryMetricsPrometheus.Core.Aggregator do
 
   @spec get_time_series(atom()) :: %{:telemetry.event_name() => [sample()]}
   def get_time_series(table_id) do
-    oneshot_id = String.to_atom("#{table_id}_oneshot")
+    plot_id = String.to_atom("#{table_id}_plot")
 
     # imperfect but not so bad 
-    oneshot =   :ets.tab2list(oneshot_id)
-    :ets.delete_all_objects(oneshot_id)
+    plots =   :ets.tab2list(plot_id)
+    :ets.delete_all_objects(plot_id)
 
-    table = :ets.tab2list(table_id) ++ oneshot
+    table = :ets.tab2list(table_id) ++ plots
 
     table
     |> Stream.filter(&filter_and_drop_time_series_with_bad_tag_values(&1, table_id))
